@@ -1,7 +1,7 @@
 # Pose Saber – AI Coding Assistant Prompt
 
 ## Project Summary
-Pose Saber is a webcam-based rhythm game inspired by Beat Saber. It uses real-time pose estimation from a front-facing webcam to track wrist movements, allowing players to slice incoming blocks using hand gestures.
+Pose Saber is a webcam-based rhythm game inspired by Beat Saber. It uses real-time pose estimation from a front-facing webcam to track wrist movements, allowing players to punch incoming blocks using hand gestures.
 
 The project is implemented in Python using:
 - [MediaPipe](https://google.github.io/mediapipe/) for real-time body pose tracking.
@@ -10,8 +10,8 @@ The project is implemented in Python using:
 
 The game currently features:
 - Real-time tracking of left and right wrists with smoothing and clamping.
-- Directional slash detection (left and right).
-- Falling notes requiring correct direction and position for a successful hit.
+- Directional punch detection, both left and right hand.
+- Blocks zooming towards the player requiring correct direction and position for a successful hit.
 - Scoring system with Pygame UI.
 - Multi-threaded pose tracking with gesture history buffers.
 
@@ -58,18 +58,15 @@ This project uses Pygame for game rendering and MediaPipe (with OpenCV) for pose
 
 ## 🔧 Next Tasks for Codex / GPT
 
-1. 🖐️ **Closed Wrist Detection**  
-   Use MediaPipe landmarks to detect a closed wrist (e.g., when the user is holding a sword). You may use relative distances between fingers and palm base to determine if the hand is closed.
+1. 🖐️ **Closed Wrist Detection and Sword creation**
+   Completely remove the idea for using a sword and doing wrist direction detection and direction estimation for it.
 
-2. 🗡️ **Draw a Sword Line**  
-   When the wrist is closed, draw a line extending from the wrist to represent a sword. The sword should have a fixed length. The sword's direction should be estimated based on the pose of the wrist.
+2. **Fist detection and punching the blocks**
+   Instead, of the sword idea, the player will punch the blocks out of the way. Detect the wrists and elbows to implement boxing punch detection. The blocks should fly away in the direction of the punch.
 
 3. 🚀 **Block Perspective Zoom**  
-   Change block behavior to move toward the player from the horizon (depth perspective), instead of falling from the top. Blocks should appear to grow in size as they approach the player.
+   Blocks are growing in size as they fall. But they are still falling from the top. Instead create them somewhere on the horizon. The horizon would be roughly in the middle of the screen. The blocks should then zoom closer to the player.
 
-4. 🔄 **Optional Direction Blocks**  
-   Some blocks should not require a directional slash. They can be destroyed by any contact with the sword. Others should retain direction-based rules. Use a flag in the `Note` class to distinguish them.
-
-5. 🧮 **Score Counter Enhancements**  
-   Display the score on the top-left of the screen. Award **higher points** for directional blocks than for any-contact blocks (e.g., 10 vs 5).
+4. **Visualize the fists with boxing gloves**
+   Instead of representing the detected markers with circles, represent them using boxing gloves. Use any asset library or python package you need.
 
