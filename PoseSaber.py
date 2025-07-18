@@ -3,9 +3,7 @@ import mediapipe as mp
 import pygame
 import threading
 import numpy as np
-import time
 import random
-from collections import deque
 
 # =====================
 # Pose Detection Setup
@@ -36,10 +34,9 @@ left_closed = False
 right_closed = False
 alpha = 0.7  # smoothing factor
 
-# History for direction detection
-history_length = 5
-left_history = deque(maxlen=history_length)
-right_history = deque(maxlen=history_length)
+# Last punch direction vectors
+left_punch_dir = None
+right_punch_dir = None
 
 # Wrist closed detection
 def is_hand_closed(results, left=True):
@@ -67,12 +64,20 @@ WIDTH, HEIGHT = 640, 480
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Pose Saber")
 clock = pygame.time.Clock()
+HORIZON_Y = HEIGHT // 2
 
 font = pygame.font.SysFont(None, 40)
 score = 0
-SWORD_LENGTH = 80
-POINT_DIRECTIONAL = 10
-POINT_ANY = 5
+POINT = 5
+
+def create_glove(color=(255, 0, 0)):
+    surf = pygame.Surface((40, 40), pygame.SRCALPHA)
+    pygame.draw.circle(surf, color, (20, 15), 15)
+    pygame.draw.rect(surf, color, pygame.Rect(5, 15, 30, 18))
+    return surf
+
+left_glove = create_glove()
+right_glove = pygame.transform.flip(left_glove, True, False)
 
 class Note:
     def __init__(self):
@@ -81,36 +86,39 @@ class Note:
         self.speed = 0.02
         self.size = 50
         self.hit = False
-        self.require_direction = random.choice([True, False])
-        self.required_direction = random.choice(['left', 'right'])
+        self.vx = 0
+        self.vy = 0
+        self.y = HORIZON_Y
 
     def update(self):
-        self.z += self.speed
-        scale = 0.3 + 0.7 * self.z
-        self.size = int(50 * scale)
-        self.y = int(100 + (HEIGHT - 150) * self.z)
+        if not self.hit:
+            self.z += self.speed
+            scale = 0.3 + 0.7 * self.z
+            self.size = int(50 * scale)
+            self.y = int(HORIZON_Y + (HEIGHT - HORIZON_Y - 50) * self.z)
+        else:
+            self.x += self.vx
+            self.y += self.vy
+            self.vx *= 0.95
+            self.vy *= 0.95
 
     def draw(self):
         color = (0, 255, 255) if not self.hit else (128, 128, 128)
         rect = pygame.Rect(self.x - self.size // 2, self.y - self.size // 2,
                            self.size, self.size)
         pygame.draw.rect(screen, color, rect)
-        if self.require_direction:
-            arrow = "<" if self.required_direction == "left" else ">"
-            arrow_text = font.render(arrow, True, (255, 0, 0))
-            screen.blit(arrow_text, (self.x - arrow_text.get_width() // 2,
-                                     self.y - arrow_text.get_height() // 2))
 
-    def check_hit(self, wrist, direction):
+    def check_hit(self, wrist, punch_dir):
         wx, wy = wrist
         half = self.size / 2
-        if self.hit:
+        if self.hit or punch_dir is None:
             return False
         if (self.x - half < wx < self.x + half and
                 self.y - half < wy < self.y + half):
-            if not self.require_direction or direction == self.required_direction:
-                self.hit = True
-                return True
+            self.hit = True
+            self.vx = punch_dir[0] * 20
+            self.vy = punch_dir[1] * 20
+            return True
         return False
 
 notes = [Note()]
@@ -122,6 +130,7 @@ def webcam_thread():
     global left_wrist, right_wrist, left_elbow, right_elbow
     global prev_left, prev_right, prev_left_elbow, prev_right_elbow
     global left_closed, right_closed
+    global left_punch_dir, right_punch_dir
     while True:
         success, frame = cap.read()
         if not success:
@@ -157,6 +166,18 @@ def webcam_thread():
             right_elbow[0] = int(alpha * rex + (1 - alpha) * prev_right_elbow[0])
             right_elbow[1] = int(alpha * rey + (1 - alpha) * prev_right_elbow[1])
 
+            # Punch detection
+            l_vec = np.array(left_wrist) - np.array(left_elbow)
+            r_vec = np.array(right_wrist) - np.array(right_elbow)
+            l_norm = l_vec / (np.linalg.norm(l_vec) + 1e-5)
+            r_norm = r_vec / (np.linalg.norm(r_vec) + 1e-5)
+            l_vel = np.array(left_wrist) - np.array(prev_left)
+            r_vel = np.array(right_wrist) - np.array(prev_right)
+            l_speed = np.dot(l_vel, l_norm)
+            r_speed = np.dot(r_vel, r_norm)
+            left_punch_dir = l_norm if left_closed and l_speed > 20 else None
+            right_punch_dir = r_norm if right_closed and r_speed > 20 else None
+
             prev_left = left_wrist[:]
             prev_right = right_wrist[:]
             prev_left_elbow = left_elbow[:]
@@ -164,10 +185,6 @@ def webcam_thread():
 
             left_closed = is_hand_closed(results, True)
             right_closed = is_hand_closed(results, False)
-
-            # Update history
-            left_history.append(left_wrist[0])
-            right_history.append(right_wrist[0])
 
         # Optional webcam preview
         cv2.imshow("Webcam", frame)
@@ -181,25 +198,6 @@ threading.Thread(target=webcam_thread, daemon=True).start()
 # =====================
 running = True
 spawn_timer = 0
-
-def get_direction(history):
-    if len(history) < 2:
-        return None
-    delta = history[-1] - history[0]
-    if abs(delta) < 30:
-        return None
-    return 'right' if delta > 0 else 'left'
-
-def draw_sword(wrist, elbow, closed, color):
-    if not closed:
-        return
-    dx = wrist[0] - elbow[0]
-    dy = wrist[1] - elbow[1]
-    length = max(np.hypot(dx, dy), 1)
-    nx, ny = dx / length, dy / length
-    end_pos = (int(wrist[0] + nx * SWORD_LENGTH),
-               int(wrist[1] + ny * SWORD_LENGTH))
-    pygame.draw.line(screen, color, (int(wrist[0]), int(wrist[1])), end_pos, 4)
 
 while running:
     screen.fill((0, 0, 0))
@@ -215,24 +213,20 @@ while running:
         notes.append(Note())
         spawn_timer = 0
 
-    # Detect slash direction
-    left_dir = get_direction(left_history)
-    right_dir = get_direction(right_history)
-
     # Update and draw notes
     for note in notes:
         note.update()
-        if not note.hit and note.check_hit(left_wrist, left_dir):
-            score += POINT_DIRECTIONAL if note.require_direction else POINT_ANY
-        if not note.hit and note.check_hit(right_wrist, right_dir):
-            score += POINT_DIRECTIONAL if note.require_direction else POINT_ANY
+        if not note.hit and note.check_hit(left_wrist, left_punch_dir):
+            score += POINT
+        if not note.hit and note.check_hit(right_wrist, right_punch_dir):
+            score += POINT
         note.draw()
 
-    # Draw cursors and swords
-    pygame.draw.circle(screen, (0, 255, 0), (int(left_wrist[0]), int(left_wrist[1])), 15)
-    pygame.draw.circle(screen, (255, 0, 0), (int(right_wrist[0]), int(right_wrist[1])), 15)
-    draw_sword(left_wrist, left_elbow, left_closed, (0, 255, 0))
-    draw_sword(right_wrist, right_elbow, right_closed, (255, 0, 0))
+    # Draw boxing gloves
+    screen.blit(left_glove, (int(left_wrist[0]) - left_glove.get_width() // 2,
+                             int(left_wrist[1]) - left_glove.get_height() // 2))
+    screen.blit(right_glove, (int(right_wrist[0]) - right_glove.get_width() // 2,
+                              int(right_wrist[1]) - right_glove.get_height() // 2))
 
     # Draw score
     score_text = font.render(f"Score: {score}", True, (255, 255, 255))
